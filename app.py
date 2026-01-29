@@ -1,5 +1,3 @@
-with open("app.py", "w") as f:
-    f.write("""
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -51,9 +49,7 @@ with st.sidebar:
     st.markdown("---")
     with st.expander("🔍 INFOTARIFFE (Dati Tecnici)"):
         sel_y = st.selectbox("Seleziona Anno", [2024, 2025, 2026], index=2)
-        # NUOVO: SELETTORE CATEGORIA IN INFOTARIFFE
         sel_c = st.selectbox("Seleziona Categoria", CATEGORIE, index=CATEGORIE.index(c_s))
-        
         if "Sociale" in sel_c: st.json(DATA_SOC)
         else:
             db = DB_ATO[sel_y]
@@ -66,7 +62,6 @@ with st.sidebar:
             st.write(f"Fognatura: € {db['v_fog']:.4f}")
             st.write(f"Depurazione: € {db['v_dep']:.4f}")
             st.write(f"Perequazione (UI): € {UI_TOT:.4f}")
-            
             sogl, prezzi = SOGLIE_DATA[sel_c], (db["p_res"] if sel_c != "Non Residenziale" else db["p_nres"])
             fasce = []
             for i in range(len(prezzi)):
@@ -91,8 +86,6 @@ else:
         d1, d2 = datetime.combine(d1_in, datetime.min.time()), datetime.combine(d2_in, datetime.min.time())
         mc_t, gg_t = l2-l1, (d2-d1).days + 1
         mf, md, up = (1 if sw_fog else 0), (1 if sw_dep else 0), mc_t*UI_TOT
-        
-        # Calcolo Pro-Rata ATO5
         r_a = {"af":0,"av":0,"ff":0,"fv":0,"df":0,"dv":0}
         det = []
         for y in [2024, 2025, 2026]:
@@ -105,7 +98,6 @@ else:
                 c_af, c_av = f*(gg/365), calc_v(mc_y, s, p)
                 r_a["af"]+=c_af; r_a["av"]+=c_av; r_a["ff"]+=db["f_fog"]*(gg/365)*mf; r_a["fv"]+=mc_y*db["v_fog"]*mf; r_a["df"]+=db["f_dep"]*(gg/365)*md; r_a["dv"]+=mc_y*db["v_dep"]*md
                 det.append({"Anno": y, "Giorni": gg, "MC": f"{mc_y:.1f}", "€ Acq (Imp.)": f"{c_af+c_av:.2f}"})
-        
         r_ts = {"af":DATA_SOC["f_acq"]*(gg_t/365), "av":calc_v(mc_t,DATA_SOC["scaglioni"],DATA_SOC["p_acq"]), "ff":DATA_SOC["f_fog"]*(gg_t/365)*mf, "fv":mc_t*DATA_SOC["p_fog"]*mf, "df":DATA_SOC["f_dep"]*(gg_t/365)*md, "dv":mc_t*DATA_SOC["p_dep"]*md}
         iva = 1.10 if iva_calc else 1.0
         st.session_state.res = {"t_ato": (sum(r_a.values())+up)*iva, "t_ts": (sum(r_ts.values())+up)*iva, "r_a": r_a, "r_ts": r_ts, "up": up, "det": det, "mc": mc_t, "gg": gg_t, "cat": c_s}
@@ -113,32 +105,24 @@ else:
 if st.session_state.res:
     res = st.session_state.res
     st.markdown("---")
-    
-    # KPIs
     k1, k2, k3 = st.columns(3)
     k1.metric("Metri Cubi Totali", f"{res['mc']:.1f} mc")
     k2.metric("Giorni Totali", f"{res['gg']} gg")
     k3.metric("Totale ATO5 (Lordo)", f"€ {res['t_ato']:.2f}")
-
     if "Sociale" in res['cat']:
         st.subheader("📋 Riepilogo Tariffa Sociale (TS)")
         df_ts = pd.DataFrame({"Costo (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]}, index=["Acquedotto", "Fognatura", "Depurazione", "Oneri Perequazione", "TOTALE TS"])
         st.table(df_ts.style.format("{:.2f}"))
     else:
-        # Layout Tabelle + Grafici
         col_t1, col_g1 = st.columns([1.5, 1])
         with col_t1:
             st.subheader("⚖️ Confronto ATO5 vs T. Sociale")
-            df_comp = pd.DataFrame({
-                "ATO5 (€)": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up'], res['t_ato']],
-                "Sociale (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]
-            }, index=["Acquedotto (f+v)", "Fognatura (f+v)", "Depurazione (f+v)", "Oneri Perequazione", "TOTALE DOVUTO"])
+            df_comp = pd.DataFrame({"ATO5 (€)": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up'], res['t_ato']], "Sociale (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]}, index=["Acquedotto (f+v)", "Fognatura (f+v)", "Depurazione (f+v)", "Oneri Perequazione", "TOTALE DOVUTO"])
             st.table(df_comp.style.format("{:.2f}"))
             st.success(f"RISPARMIO NETTO: € {res['t_ato']-res['t_ts']:.2f}")
         with col_g1:
             st.subheader("📊 Totali Comparati")
             st.bar_chart(pd.DataFrame({"Euro": [res['t_ato'], res['t_ts']]}, index=["ATO5", "Sociale"]))
-
         st.markdown("---")
         col_t2, col_g2 = st.columns([1.5, 1])
         with col_t2:
@@ -148,10 +132,3 @@ if st.session_state.res:
             st.subheader("🍕 Incidenza Costi ATO5")
             fig = px.pie(values=[res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up']], names=["Acquedotto", "Fognatura", "Depurazione", "Oneri UI"], color_discrete_sequence=['#1f77b4', '#9467bd', '#2ca02c', '#7f7f7f'], hole=0.3)
             st.plotly_chart(fig, use_container_width=True)
-""")
-
-import os
-os.system("pkill cloudflared")
-os.system("pkill streamlit")
-os.system("streamlit run app.py &")
-!cloudflared tunnel --url http://localhost:8501
