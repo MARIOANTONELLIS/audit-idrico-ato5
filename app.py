@@ -4,9 +4,25 @@ import plotly.express as px
 from datetime import datetime, date
 import os
 
-st.set_page_config(page_title="Audit Idrico ATO5", layout="wide")
+# --- 1. CONFIGURAZIONE PAGINA E ICONA ---
+st.set_page_config(
+    page_title="Audit Idrico ATO5", 
+    page_icon="icon.png", 
+    layout="wide"
+)
 
-# --- DATABASE TARIFFE ---
+# --- 2. TRUCCO ESTETICO PER MOBILE (Nasconde menu e footer Streamlit) ---
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            .stDeployButton {display:none;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
+# --- 3. DATABASE TARIFFE ---
 UI_TOT = 0.0329 
 DB_ATO = {
     2024: { "f_acq_res": 48.2423, "f_acq_nres": 122.2138, "f_fog": 8.8766, "f_dep": 30.8751, "v_fog": 0.4239, "v_dep": 1.2824, "p_res": [1.2010, 1.5014, 2.4021, 4.8042, 7.2062], "p_nres": [1.5014, 2.4021, 4.8042, 7.2062] },
@@ -34,12 +50,14 @@ def calc_v(mc, s, p):
 if 'res' not in st.session_state: st.session_state.res = None
 def reset_res(): st.session_state.res = None
 
-# --- SIDEBAR ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
-    for logo_name in ["icon.jpg", "icon.png", "ico.png", "ICONA_APP.jpg"]:
+    # Gestione Logo
+    for logo_name in ["icon.png", "icon.jpg", "ico.png"]:
         if os.path.exists(logo_name):
             st.image(logo_name, use_container_width=True)
             break
+            
     st.subheader("⚙️ Configurazione")
     c_s = st.selectbox("CATEGORIA UTENZA", CATEGORIE, index=2, on_change=reset_res)
     sw_fog = st.toggle("Fognatura", value=True, on_change=reset_res)
@@ -50,7 +68,21 @@ with st.sidebar:
     with st.expander("🔍 INFOTARIFFE (Dati Tecnici)"):
         sel_y = st.selectbox("Seleziona Anno", [2024, 2025, 2026], index=2)
         sel_c = st.selectbox("Seleziona Categoria", CATEGORIE, index=CATEGORIE.index(c_s))
-        if "Sociale" in sel_c: st.json(DATA_SOC)
+        
+        if "Sociale" in sel_c:
+            st.markdown("**CANONI FISSI:**")
+            st.write(f"Acquedotto: € {DATA_SOC['f_acq']:.4f}")
+            st.write(f"Fognatura: € {DATA_SOC['f_fog']:.4f}")
+            st.write(f"Depurazione: € {DATA_SOC['f_dep']:.4f}")
+            st.markdown("**QUOTE VARIABILI:**")
+            st.write(f"Fognatura: € {DATA_SOC['p_fog']:.4f}")
+            st.write(f"Depurazione: € {DATA_SOC['p_dep']:.4f}")
+            sogl_ts, prezzi_ts = DATA_SOC["scaglioni"], DATA_SOC["p_acq"]
+            fasce_ts = []
+            for i in range(len(prezzi_ts)):
+                rg = f"0-{sogl_ts[i]}" if i==0 else (f"{sogl_ts[i-1]+1}-{sogl_ts[i]}" if i < len(sogl_ts) else f">{sogl_ts[-1]}")
+                fasce_ts.append({"Fascia": f"Fascia {i+1}", "Scaglioni mc": rg, "Tariffa €/mc": f"{prezzi_ts[i]:.5f}"})
+            st.table(pd.DataFrame(fasce_ts))
         else:
             db = DB_ATO[sel_y]
             f_a = db["f_acq_nres"] if sel_c == "Non Residenziale" else db["f_acq_res"]
@@ -69,7 +101,7 @@ with st.sidebar:
                 fasce.append({"Fascia": f"Fascia {i+1}", "Scaglioni mc": rg, "Tariffa €/mc": f"{prezzi[i]:.4f}"})
             st.table(pd.DataFrame(fasce))
 
-# --- MAIN ---
+# --- 5. MAIN ---
 st.title("💧 AUDIT IDRICO ATO5")
 c_i1, c_i2 = st.columns(2)
 with c_i1:
@@ -123,12 +155,4 @@ if st.session_state.res:
         with col_g1:
             st.subheader("📊 Totali Comparati")
             st.bar_chart(pd.DataFrame({"Euro": [res['t_ato'], res['t_ts']]}, index=["ATO5", "Sociale"]))
-        st.markdown("---")
-        col_t2, col_g2 = st.columns([1.5, 1])
-        with col_t2:
-            st.subheader("📝 Dettaglio Analitico Pro-Rata")
-            st.table(pd.DataFrame(res["det"]))
-        with col_g2:
-            st.subheader("🍕 Incidenza Costi ATO5")
-            fig = px.pie(values=[res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up']], names=["Acquedotto", "Fognatura", "Depurazione", "Oneri UI"], color_discrete_sequence=['#1f77b4', '#9467bd', '#2ca02c', '#7f7f7f'], hole=0.3)
-            st.plotly_chart(fig, use_container_width=True)
+
