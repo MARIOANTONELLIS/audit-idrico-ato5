@@ -17,7 +17,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATABASE TARIFFE ---
+# --- 3. DATABASE TARIFFE (Dati originali preservati) ---
 UI_TOT = 0.0329 
 DB_ATO = {
     2024: { "f_acq_res": 48.2423, "f_acq_nres": 122.2138, "f_fog": 8.8766, "f_dep": 30.8751, "v_fog": 0.4239, "v_dep": 1.2824, "p_res": [1.2010, 1.5014, 2.4021, 4.8042, 7.2062], "p_nres": [1.5014, 2.4021, 4.8042, 7.2062] },
@@ -61,16 +61,19 @@ with st.sidebar:
         sel_c_inf = st.selectbox("Cat. Rif.", CATEGORIE, index=CATEGORIE.index(c_s), key="c_info")
         
         if "Sociale" in sel_c_inf:
-            st.write(f"**FISSI:** Acq {DATA_SOC['f_acq']:.2f} | Fog {DATA_SOC['f_fog']:.2f} | Dep {DATA_SOC['f_dep']:.2f}")
+            # Precisione a 4 decimali come richiesto per Fog e Dep
+            st.write(f"**FISSI:** Acq {DATA_SOC['f_acq']:.2f} | Fog {DATA_SOC['f_fog']:.4f} | Dep {DATA_SOC['f_dep']:.4f}")
             st.write(f"**VARIABILI:** Fog {DATA_SOC['p_fog']:.4f} | Dep {DATA_SOC['p_dep']:.4f} | Pereq. {UI_TOT:.4f}")
-            st.table(pd.DataFrame({"Volume": [f"fino a {s} mc" for s in DATA_SOC['scaglioni']] + ["eccedenza"], "Acq €/mc": DATA_SOC['p_acq']}))
+            df_inf_s = pd.DataFrame({"Volume": [f"fino a {s} mc" for s in DATA_SOC['scaglioni']] + ["eccedenza"], "Acq €/mc": DATA_SOC['p_acq']})
+            st.table(df_inf_s.style.format({"Acq €/mc": "{:.5f}"}))
         else:
             db_inf = DB_ATO[sel_y_inf]
             f_a_inf = db_inf["f_acq_nres"] if sel_c_inf == "Non Residenziale" else db_inf["f_acq_res"]
             st.write(f"**FISSI:** Acq {f_a_inf:.2f} | Fog {db_inf['f_fog']:.2f} | Dep {db_inf['f_dep']:.2f}")
             st.write(f"**VARIABILI:** Fog {db_inf['v_fog']:.4f} | Dep {db_inf['v_dep']:.4f} | Pereq. {UI_TOT:.4f}")
             s_inf, p_inf = SOGLIE_DATA[sel_c_inf], (db_inf["p_res"] if sel_c_inf != "Non Residenziale" else db_inf["p_nres"])
-            st.table(pd.DataFrame({"Fascia mc": [f"fino a {s}" for s in s_inf] + [">"+str(s_inf[-1])], "Acq €/mc": p_inf}))
+            df_inf_a = pd.DataFrame({"Fascia mc": [f"fino a {s}" for s in s_inf] + [">"+str(s_inf[-1])], "Acq €/mc": p_inf})
+            st.table(df_inf_a.style.format({"Acq €/mc": "{:.4f}"}))
 
 # --- 5. MAIN ---
 st.title("💧 AUDIT IDRICO ATO5")
@@ -88,6 +91,7 @@ if st.button("ESEGUI ELABORAZIONE AUDIT", type="primary", use_container_width=Tr
     iva = 1.10 if iva_calc else 1.0
     mf, md = (1 if sw_fog else 0), (1 if sw_dep else 0)
     r_a = {"af":0,"av":0,"ff":0,"fv":0,"df":0,"dv":0}; det = []
+    
     for y in [2024, 2025, 2026]:
         ei, ef = max(d1, datetime(y,1,1)), min(d2, datetime(y,12,31))
         if ei <= ef:
@@ -100,7 +104,8 @@ if st.button("ESEGUI ELABORAZIONE AUDIT", type="primary", use_container_width=Tr
             c_up = mc_y * UI_TOT
             tot_y = (c_af + c_av + c_ff + c_fv + c_df + c_dv + c_up) * iva
             r_a["af"]+=c_af; r_a["av"]+=c_av; r_a["ff"]+=c_ff; r_a["fv"]+=c_fv; r_a["df"]+=c_df; r_a["dv"]+=c_dv
-            det.append({"Anno": y, "Giorni": gg, "MC": round(mc_y, 1), "Importo t. €": round(tot_y, 2)})
+            det.append({"Anno": y, "Giorni": gg, "MC": mc_y, "Importo t. €": tot_y})
+
     up_tot = mc_t * UI_TOT
     r_ts = {"af":DATA_SOC["f_acq"]*(gg_t/365), "av":calc_v(mc_t,DATA_SOC["scaglioni"],DATA_SOC["p_acq"]), "ff":DATA_SOC["f_fog"]*(gg_t/365)*mf, "fv":mc_t*DATA_SOC["p_fog"]*mf, "df":DATA_SOC["f_dep"]*(gg_t/365)*md, "dv":mc_t*DATA_SOC["p_dep"]*md}
     st.session_state.res = {"t_ato": (sum(r_a.values())+up_tot)*iva, "t_ts": (sum(r_ts.values())+up_tot)*iva, "r_a": r_a, "r_ts": r_ts, "up": up_tot, "det": det, "mc": mc_t, "gg": gg_t, "cat": c_s}
@@ -109,21 +114,32 @@ if st.session_state.res:
     res = st.session_state.res
     st.markdown("---")
     k1, k2, k3 = st.columns(3); k1.metric("Volume", f"{res['mc']:.1f} mc"); k2.metric("Giorni", f"{res['gg']} gg"); k3.metric("Totale ATO5", f"€ {res['t_ato']:.2f}")
+    
     st.subheader("⚖️ Analisi Comparativa")
     df_comp = pd.DataFrame({
         "ATO5 (€)": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up'], res['t_ato']],
         "Sociale (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]
     }, index=["Acquedotto", "Fognatura", "Depurazione", "Perequazione (UI)", "TOTALE LORDO"])
-    st.table(df_comp.style.format("{:.2f}"))
+    # Formattazione pulita: niente separatore migliaia, punto per decimali
+    st.table(df_comp.style.format(precision=2, thousands="", decimal="."))
+    
     st.markdown("---")
     st.subheader("📊 Grafico Raffronto Totali")
     st.plotly_chart(px.bar(pd.DataFrame({"Tariffa": ["ATO5", "Sociale"], "Totale €": [res['t_ato'], res['t_ts']]}), x='Tariffa', y='Totale €', color='Tariffa', text_auto='.2f', color_discrete_map={"ATO5": "#3366CC", "Sociale": "#109618"}), use_container_width=True)
+    
     st.markdown("---")
     st.subheader("🍕 Incidenza Voci (ATO5)")
     st.plotly_chart(px.pie(pd.DataFrame({"Voce": ["Acquedotto", "Fognatura", "Depurazione", "Oneri UI"], "Valore": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up']]}), values='Valore', names='Voce', hole=0.4), use_container_width=True)
+    
     st.markdown("---")
     st.subheader("📅 Ripartizione Pro-Rata")
-    st.table(pd.DataFrame(res["det"]))
+    # Formattazione Pro-Rata: MC 1 decimale, Importo 2 decimali, niente migliaia
+    df_det = pd.DataFrame(res["det"])
+    st.table(df_det.style.format({
+        "MC": "{:.1f}",
+        "Importo t. €": "{:.2f}"
+    }, thousands="", decimal="."))
+
 
 
 
