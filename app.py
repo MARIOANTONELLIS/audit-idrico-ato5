@@ -4,23 +4,19 @@ import plotly.express as px
 from datetime import datetime, date
 import os
 
-# --- 1. CONFIGURAZIONE PAGINA E ICONA ---
-st.set_page_config(
-    page_title="Audit Idrico ATO5", 
-    page_icon="icon.png", 
-    layout="wide"
-)
+# --- 1. CONFIGURAZIONE PAGINA ---
+st.set_page_config(page_title="Audit Idrico ATO5", page_icon="icon.png", layout="wide")
 
-# --- 2. TRUCCO ESTETICO PER MOBILE ---
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            .stDeployButton {display:none;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+# --- 2. CSS PER NASCONDERE INTERFACCIA E PULIZIA ---
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stDeployButton {display:none;}
+    .stTable {margin-left: auto; margin-right: auto;}
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- 3. DATABASE TARIFFE ---
 UI_TOT = 0.0329 
@@ -62,83 +58,108 @@ with st.sidebar:
     with st.expander("🔍 INFOTARIFFE (Dati Tecnici)"):
         sel_y = st.selectbox("Anno", [2024, 2025, 2026], index=2)
         if "Sociale" in c_s:
-            st.write(f"Acq: € {DATA_SOC['f_acq']:.4f} | Fog: € {DATA_SOC['f_fog']:.4f}")
+            st.write(f"Acq Fissa: € {DATA_SOC['f_acq']:.2f}")
             st.table(pd.DataFrame({"mc": [f"fino a {s}" for s in DATA_SOC['scaglioni']] + [">155"], "€/mc": DATA_SOC['p_acq']}))
         else:
             db = DB_ATO[sel_y]
             f_a = db["f_acq_nres"] if c_s == "Non Residenziale" else db["f_acq_res"]
-            st.write(f"Fisse: Acq {f_a:.2f} | Fog {db['f_fog']:.2f} | Dep {db['f_dep']:.2f}")
+            st.write(f"Acq {f_a:.2f} | Fog {db['f_fog']:.2f} | Dep {db['f_dep']:.2f}")
             sogl, prezzi = SOGLIE_DATA[c_s], (db["p_res"] if c_s != "Non Residenziale" else db["p_nres"])
-            st.table(pd.DataFrame({"Scaglioni": [f"fino a {s}" for s in sogl] + [">"+str(sogl[-1])], "Tariffa": prezzi}))
+            st.table(pd.DataFrame({"Fascia": [f"fino a {s}" for s in sogl] + [">"+str(sogl[-1])], "€/mc": prezzi}))
 
 # --- 5. MAIN ---
 st.title("💧 AUDIT IDRICO ATO5")
-c1, c2 = st.columns(2)
-with c1:
+ci1, ci2 = st.columns(2)
+with ci1:
     d1_in = st.date_input("Inizio Periodo:", date(2024, 1, 1), on_change=reset_res)
     l1 = st.number_input("Lettura Iniziale (mc):", value=230.0, on_change=reset_res)
-with c2:
+with ci2:
     d2_in = st.date_input("Fine Periodo:", date(2026, 12, 31), on_change=reset_res)
     l2 = st.number_input("Lettura Finale (mc):", value=800.0, on_change=reset_res)
 
 if st.button("ESEGUI ELABORAZIONE AUDIT", type="primary", use_container_width=True):
     d1, d2 = datetime.combine(d1_in, datetime.min.time()), datetime.combine(d2_in, datetime.min.time())
     mc_t, gg_t = l2-l1, (d2-d1).days + 1
-    mf, md, up = (1 if sw_fog else 0), (1 if sw_dep else 0), mc_t*UI_TOT
+    iva = 1.10 if iva_calc else 1.0
+    mf, md = (1 if sw_fog else 0), (1 if sw_dep else 0)
     r_a = {"af":0,"av":0,"ff":0,"fv":0,"df":0,"dv":0}
     det = []
+    
     for y in [2024, 2025, 2026]:
         ei, ef = max(d1, datetime(y,1,1)), min(d2, datetime(y,12,31))
         if ei <= ef:
-            gg = (ef-ei).days+1; mc_y = mc_t*(gg/gg_t); db = DB_ATO[y]
-            f = db["f_acq_nres"] if c_s == "Non Residenziale" else db["f_acq_res"]
+            gg = (ef-ei).days+1
+            mc_y = mc_t*(gg/gg_t)
+            db = DB_ATO[y]
+            # Calcoli fette annuali
+            f_a = db["f_acq_nres"] if c_s == "Non Residenziale" else db["f_acq_res"]
             s = [] if "Sociale" in c_s else SOGLIE_DATA[c_s]
             p = db["p_nres"] if c_s == "Non Residenziale" else db["p_res"]
-            c_af, c_av = f*(gg/365), calc_v(mc_y, s, p)
-            r_a["af"]+=c_af; r_a["av"]+=c_av; r_a["ff"]+=db["f_fog"]*(gg/365)*mf; r_a["fv"]+=mc_y*db["v_fog"]*mf; r_a["df"]+=db["f_dep"]*(gg/365)*md; r_a["dv"]+=mc_y*db["v_dep"]*md
-            det.append({"Anno": y, "Giorni": gg, "MC": round(mc_y,1), "Imponibile €": round(c_af+c_av,2)})
+            
+            c_af = f_a * (gg/365)
+            c_av = calc_v(mc_y, s, p)
+            c_ff = db["f_fog"] * (gg/365) * mf
+            c_fv = mc_y * db["v_fog"] * mf
+            c_df = db["f_dep"] * (gg/365) * md
+            c_dv = mc_y * db["v_dep"] * md
+            c_up = mc_y * UI_TOT
+            
+            # Somma totale di periodo lorda
+            tot_periodo = (c_af + c_av + c_ff + c_fv + c_df + c_dv + c_up) * iva
+            
+            # Accumulo per riepilogo generale
+            r_a["af"]+=c_af; r_a["av"]+=c_av; r_a["ff"]+=c_ff; r_a["fv"]+=c_fv; r_a["df"]+=c_df; r_a["dv"]+=c_dv
+            
+            det.append({
+                "Anno": y, 
+                "Giorni": gg, 
+                "MC": round(mc_y, 1), 
+                "Importo t. €": round(tot_periodo, 2)
+            })
+
+    up_tot = mc_t * UI_TOT
     r_ts = {"af":DATA_SOC["f_acq"]*(gg_t/365), "av":calc_v(mc_t,DATA_SOC["scaglioni"],DATA_SOC["p_acq"]), "ff":DATA_SOC["f_fog"]*(gg_t/365)*mf, "fv":mc_t*DATA_SOC["p_fog"]*mf, "df":DATA_SOC["f_dep"]*(gg_t/365)*md, "dv":mc_t*DATA_SOC["p_dep"]*md}
-    iva = 1.10 if iva_calc else 1.0
-    st.session_state.res = {"t_ato": (sum(r_a.values())+up)*iva, "t_ts": (sum(r_ts.values())+up)*iva, "r_a": r_a, "r_ts": r_ts, "up": up, "det": det, "mc": mc_t, "gg": gg_t, "cat": c_s}
+    
+    st.session_state.res = {
+        "t_ato": (sum(r_a.values())+up_tot)*iva, 
+        "t_ts": (sum(r_ts.values())+up_tot)*iva, 
+        "r_a": r_a, "r_ts": r_ts, "up": up_tot, "det": det, "mc": mc_t, "gg": gg_t, "cat": c_s
+    }
 
 if st.session_state.res:
     res = st.session_state.res
     st.markdown("---")
     
-    # KPIs
+    # 1. Riepilogo Rapido
     k1, k2, k3 = st.columns(3)
-    k1.metric("Metri Cubi", f"{res['mc']:.1f} mc")
-    k2.metric("Giorni", f"{res['gg']} gg")
-    k3.metric("Totale Lordo ATO5", f"€ {res['t_ato']:.2f}")
+    k1.metric("Volume Totale", f"{res['mc']:.1f} mc")
+    k2.metric("Arco Temporale", f"{res['gg']} gg")
+    k3.metric("Totale Dovuto ATO5", f"€ {res['t_ato']:.2f}")
 
-    # TABELLA CONFRONTO E BAR CHART
-    col_t, col_g = st.columns([1.5, 1])
-    with col_t:
-        st.subheader("⚖️ Confronto ATO5 vs Sociale")
-        df_comp = pd.DataFrame({
-            "ATO5 (€)": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up'], res['t_ato']],
-            "Sociale (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]
-        }, index=["Acquedotto", "Fognatura", "Depurazione", "Perequazione", "TOTALE"])
-        st.table(df_comp.style.format("{:.2f}"))
-        st.success(f"RISPARMIO: € {res['t_ato']-res['t_ts']:.2f}")
+    # 2. Analisi Comparativa
+    st.subheader("⚖️ Analisi Comparativa Tariffe")
+    df_comp = pd.DataFrame({
+        "ATO5 (€)": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up'], res['t_ato']],
+        "Sociale (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]
+    }, index=["Servizio Acquedotto", "Servizio Fognatura", "Servizio Depurazione", "Oneri UI (Perequazione)", "TOTALE FATTURA (Lordo)"])
+    st.table(df_comp.style.format("{:.2f}"))
+    st.success(f"POTENZIALE RISPARMIO CON TARIFFA SOCIALE: € {res['t_ato']-res['t_ts']:.2f}")
 
-    with col_g:
-        st.subheader("📊 Totali")
-        st.bar_chart(pd.DataFrame({"Euro": [res['t_ato'], res['t_ts']]}, index=["ATO5", "Sociale"]))
-
-    # GRAFICO A TORTA E PRO-RATA
+    # 3. Grafico Incidenza Centrato
     st.markdown("---")
-    col_p, col_d = st.columns([1, 1.2])
-    with col_p:
-        st.subheader("🍕 Distribuzione Spesa ATO5")
-        df_pie = pd.DataFrame({
-            "Voce": ["Acquedotto", "Fognatura", "Depurazione", "Oneri"],
-            "Valore": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up']]
-        })
-        fig = px.pie(df_pie, values='Valore', names='Voce', hole=0.3, color_discrete_sequence=px.colors.qualitative.Bold)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col_d:
-        st.subheader("📅 Ripartizione Pro-Rata")
-        st.table(pd.DataFrame(res["det"]))
+    st.subheader("🍕 Incidenza Voci di Costo (ATO5)")
+    df_pie = pd.DataFrame({
+        "Voce": ["Acquedotto", "Fognatura", "Depurazione", "Oneri UI"],
+        "Valore": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up']]
+    })
+    fig = px.pie(df_pie, values='Valore', names='Voce', hole=0.4, color_discrete_sequence=px.colors.qualitative.Safe)
+    fig.update_layout(margin=dict(t=20, b=20, l=0, r=0))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 4. Tabella Pro-Rata Dettagliata (Richiesta Mario)
+    st.markdown("---")
+    st.subheader("📅 Ripartizione Analitica Pro-Rata")
+    st.info("La colonna 'Importo t. €' rappresenta il totale lordo (inclusa IVA e oneri) per il rispettivo periodo annuale.")
+    st.table(pd.DataFrame(res["det"]))
+
 
