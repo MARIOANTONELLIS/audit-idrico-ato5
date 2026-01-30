@@ -7,7 +7,7 @@ import os
 # --- 1. CONFIGURAZIONE ---
 st.set_page_config(page_title="Audit Idrico ATO5", page_icon="icon.png", layout="wide")
 
-# --- 2. CSS PER PULIZIA ---
+# --- 2. CSS ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -17,7 +17,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATABASE TARIFFE ---
+# --- 3. DATABASE ---
 UI_TOT = 0.0329 
 DB_ATO = {
     2024: { "f_acq_res": 48.2423, "f_acq_nres": 122.2138, "f_fog": 8.8766, "f_dep": 30.8751, "v_fog": 0.4239, "v_dep": 1.2824, "p_res": [1.2010, 1.5014, 2.4021, 4.8042, 7.2062], "p_nres": [1.5014, 2.4021, 4.8042, 7.2062] },
@@ -59,7 +59,6 @@ with st.sidebar:
     with st.expander("🔍 INFOTARIFFE (Consultazione)", expanded=False):
         sel_y_inf = st.selectbox("Anno Rif.", [2024, 2025, 2026], index=2, key="y_info")
         sel_c_inf = st.selectbox("Cat. Rif.", CATEGORIE, index=CATEGORIE.index(c_s), key="c_info")
-        
         if "Sociale" in sel_c_inf:
             st.write(f"**FISSI:** Acq {DATA_SOC['f_acq']:.2f} | Fog {DATA_SOC['f_fog']:.4f} | Dep {DATA_SOC['f_dep']:.4f}")
             st.write(f"**VARIABILI:** Fog {DATA_SOC['p_fog']:.4f} | Dep {DATA_SOC['p_dep']:.4f} | Pereq. {UI_TOT:.4f}")
@@ -78,71 +77,62 @@ with st.sidebar:
 st.title("💧 AUDIT IDRICO ATO5")
 ci1, ci2 = st.columns(2)
 with ci1:
-    # BLOCCO DATE 2024-2026 REINSERITO
-    d1_in = st.date_input("Data Inizio:", 
-                         value=date(2024, 1, 1), 
-                         min_value=date(2024, 1, 1), 
-                         max_value=date(2026, 12, 31), 
-                         on_change=reset_res)
+    d1_in = st.date_input("Inizio Periodo:", value=date(2024, 1, 1), min_value=date(2024, 1, 1), max_value=date(2026, 12, 31), on_change=reset_res)
     l1 = st.number_input("Lettura Iniziale:", value=230.0, on_change=reset_res)
 with ci2:
-    # BLOCCO DATE 2024-2026 REINSERITO
-    d2_in = st.date_input("Data Fine:", 
-                         value=date(2026, 12, 31), 
-                         min_value=date(2024, 1, 1), 
-                         max_value=date(2026, 12, 31), 
-                         on_change=reset_res)
+    d2_in = st.date_input("Fine Periodo:", value=date(2026, 12, 31), min_value=date(2024, 1, 1), max_value=date(2026, 12, 31), on_change=reset_res)
     l2 = st.number_input("Lettura Finale:", value=800.0, on_change=reset_res)
 
-if st.button("ESEGUI ELABORAZIONE AUDIT", type="primary", use_container_width=True):
-    d1, d2 = datetime.combine(d1_in, datetime.min.time()), datetime.combine(d2_in, datetime.min.time())
-    mc_t, gg_t = l2-l1, (d2-d1).days + 1
-    iva = 1.10 if iva_calc else 1.0
-    mf, md = (1 if sw_fog else 0), (1 if sw_dep else 0)
-    r_a = {"af":0,"av":0,"ff":0,"fv":0,"df":0,"dv":0}; det = []
-    
-    for y in [2024, 2025, 2026]:
-        ei, ef = max(d1, datetime(y,1,1)), min(d2, datetime(y,12,31))
-        if ei <= ef:
-            gg = (ef-ei).days+1; mc_y = mc_t*(gg/gg_t); db = DB_ATO[y]
-            f_a = db["f_acq_nres"] if c_s == "Non Residenziale" else db["f_acq_res"]
-            s, p = ([] if "Sociale" in c_s else SOGLIE_DATA[c_s]), (db["p_nres"] if c_s == "Non Residenziale" else db["p_res"])
-            c_af, c_av = f_a * (gg/365), calc_v(mc_y, s, p)
-            c_ff, c_fv = db["f_fog"]*(gg/365)*mf, mc_y*db["v_fog"]*mf
-            c_df, c_dv = db["f_dep"]*(gg/365)*md, mc_y*db["v_dep"]*md
-            c_up = mc_y * UI_TOT
-            tot_y = (c_af + c_av + c_ff + c_fv + c_df + c_dv + c_up) * iva
-            r_a["af"]+=c_af; r_a["av"]+=c_av; r_a["ff"]+=c_ff; r_a["fv"]+=c_fv; r_a["df"]+=c_df; r_a["dv"]+=c_dv
-            det.append({"Anno": y, "Giorni": gg, "MC": mc_y, "Importo t. €": tot_y})
+# --- GUARDIANI DELLA LOGICA (DOGMA) ---
+errori = []
+if d1_in > d2_in: errori.append("⚠️ Errore: La data iniziale non può essere superiore alla finale.")
+if l1 > l2: errori.append("⚠️ Errore: La lettura iniziale non può essere superiore alla finale.")
 
-    up_tot = mc_t * UI_TOT
-    r_ts = {"af":DATA_SOC["f_acq"]*(gg_t/365), "av":calc_v(mc_t,DATA_SOC["scaglioni"],DATA_SOC["p_acq"]), "ff":DATA_SOC["f_fog"]*(gg_t/365)*mf, "fv":mc_t*DATA_SOC["p_fog"]*mf, "df":DATA_SOC["f_dep"]*(gg_t/365)*md, "dv":mc_t*DATA_SOC["p_dep"]*md}
-    st.session_state.res = {"t_ato": (sum(r_a.values())+up_tot)*iva, "t_ts": (sum(r_ts.values())+up_tot)*iva, "r_a": r_a, "r_ts": r_ts, "up": up_tot, "det": det, "mc": mc_t, "gg": gg_t, "cat": c_s}
+if errori:
+    for err in errori: st.error(err)
+else:
+    if st.button("ESEGUI ELABORAZIONE AUDIT", type="primary", use_container_width=True):
+        d1, d2 = datetime.combine(d1_in, datetime.min.time()), datetime.combine(d2_in, datetime.min.time())
+        mc_t, gg_t = l2-l1, (d2-d1).days + 1
+        iva = 1.10 if iva_calc else 1.0; mf, md = (1 if sw_fog else 0), (1 if sw_dep else 0)
+        r_a = {"af":0,"av":0,"ff":0,"fv":0,"df":0,"dv":0}; det = []
+        for y in [2024, 2025, 2026]:
+            ei, ef = max(d1, datetime(y,1,1)), min(d2, datetime(y,12,31))
+            if ei <= ef:
+                gg = (ef-ei).days+1; mc_y = mc_t*(gg/gg_t); db = DB_ATO[y]
+                f_a = db["f_acq_nres"] if c_s == "Non Residenziale" else db["f_acq_res"]
+                s, p = ([] if "Sociale" in c_s else SOGLIE_DATA[c_s]), (db["p_nres"] if c_s == "Non Residenziale" else db["p_res"])
+                c_af, c_av = f_a * (gg/365), calc_v(mc_y, s, p)
+                c_ff, c_fv = db["f_fog"]*(gg/365)*mf, mc_y*db["v_fog"]*mf
+                c_df, c_dv = db["f_dep"]*(gg/365)*md, mc_y*db["v_dep"]*md
+                c_up = mc_y * UI_TOT
+                tot_y = (c_af + c_av + c_ff + c_fv + c_df + c_dv + c_up) * iva
+                r_a["af"]+=c_af; r_a["av"]+=c_av; r_a["ff"]+=c_ff; r_a["fv"]+=c_fv; r_a["df"]+=c_df; r_a["dv"]+=c_dv
+                det.append({"Anno": y, "Giorni": gg, "MC": mc_y, "Importo t. €": tot_y})
+        up_tot = mc_t * UI_TOT
+        r_ts = {"af":DATA_SOC["f_acq"]*(gg_t/365), "av":calc_v(mc_t,DATA_SOC["scaglioni"],DATA_SOC["p_acq"]), "ff":DATA_SOC["f_fog"]*(gg_t/365)*mf, "fv":mc_t*DATA_SOC["p_fog"]*mf, "df":DATA_SOC["f_dep"]*(gg_t/365)*md, "dv":mc_t*DATA_SOC["p_dep"]*md}
+        st.session_state.res = {"t_ato": (sum(r_a.values())+up_tot)*iva, "t_ts": (sum(r_ts.values())+up_tot)*iva, "r_a": r_a, "r_ts": r_ts, "up": up_tot, "det": det, "mc": mc_t, "gg": gg_t, "cat": c_s}
 
 if st.session_state.res:
     res = st.session_state.res
     st.markdown("---")
     k1, k2, k3 = st.columns(3); k1.metric("Volume", f"{res['mc']:.1f} mc"); k2.metric("Giorni", f"{res['gg']} gg"); k3.metric("Totale ATO5", f"€ {res['t_ato']:.2f}")
-    
     st.subheader("⚖️ Analisi Comparativa")
     df_comp = pd.DataFrame({
         "ATO5 (€)": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up'], res['t_ato']],
         "Sociale (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]
     }, index=["Acquedotto", "Fognatura", "Depurazione", "Perequazione (UI)", "TOTALE LORDO"])
     st.table(df_comp.style.format(precision=2, thousands="", decimal="."))
-    
     st.markdown("---")
-    st.subheader("📊 Grafico Raffronto Totali")
+    st.subheader("📊 Raffronto Totali")
     st.plotly_chart(px.bar(pd.DataFrame({"Tariffa": ["ATO5", "Sociale"], "Totale €": [res['t_ato'], res['t_ts']]}), x='Tariffa', y='Totale €', color='Tariffa', text_auto='.2f', color_discrete_map={"ATO5": "#3366CC", "Sociale": "#109618"}), use_container_width=True)
-    
     st.markdown("---")
     st.subheader("🍕 Incidenza Voci (ATO5)")
     st.plotly_chart(px.pie(pd.DataFrame({"Voce": ["Acquedotto", "Fognatura", "Depurazione", "Oneri UI"], "Valore": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up']]}), values='Valore', names='Voce', hole=0.4), use_container_width=True)
-    
     st.markdown("---")
     st.subheader("📅 Ripartizione Pro-Rata")
-    df_det = pd.DataFrame(res["det"])
-    st.table(df_det.style.format({"MC": "{:.1f}", "Importo t. €": "{:.2f}"}, thousands="", decimal="."))
+    st.table(pd.DataFrame(res["det"]).style.format({"MC": "{:.1f}", "Importo t. €": "{:.2f}"}, thousands="", decimal="."))
+
 
 
 
