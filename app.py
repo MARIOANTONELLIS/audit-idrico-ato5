@@ -17,7 +17,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATABASE TARIFFE (Dati originali preservati) ---
+# --- 3. DATABASE TARIFFE ---
 UI_TOT = 0.0329 
 DB_ATO = {
     2024: { "f_acq_res": 48.2423, "f_acq_nres": 122.2138, "f_fog": 8.8766, "f_dep": 30.8751, "v_fog": 0.4239, "v_dep": 1.2824, "p_res": [1.2010, 1.5014, 2.4021, 4.8042, 7.2062], "p_nres": [1.5014, 2.4021, 4.8042, 7.2062] },
@@ -61,7 +61,6 @@ with st.sidebar:
         sel_c_inf = st.selectbox("Cat. Rif.", CATEGORIE, index=CATEGORIE.index(c_s), key="c_info")
         
         if "Sociale" in sel_c_inf:
-            # Precisione a 4 decimali come richiesto per Fog e Dep
             st.write(f"**FISSI:** Acq {DATA_SOC['f_acq']:.2f} | Fog {DATA_SOC['f_fog']:.4f} | Dep {DATA_SOC['f_dep']:.4f}")
             st.write(f"**VARIABILI:** Fog {DATA_SOC['p_fog']:.4f} | Dep {DATA_SOC['p_dep']:.4f} | Pereq. {UI_TOT:.4f}")
             df_inf_s = pd.DataFrame({"Volume": [f"fino a {s} mc" for s in DATA_SOC['scaglioni']] + ["eccedenza"], "Acq €/mc": DATA_SOC['p_acq']})
@@ -79,10 +78,20 @@ with st.sidebar:
 st.title("💧 AUDIT IDRICO ATO5")
 ci1, ci2 = st.columns(2)
 with ci1:
-    d1_in = st.date_input("Inizio Periodo:", date(2024, 1, 1), on_change=reset_res)
+    # BLOCCO DATE 2024-2026 REINSERITO
+    d1_in = st.date_input("Data Inizio:", 
+                         value=date(2024, 1, 1), 
+                         min_value=date(2024, 1, 1), 
+                         max_value=date(2026, 12, 31), 
+                         on_change=reset_res)
     l1 = st.number_input("Lettura Iniziale:", value=230.0, on_change=reset_res)
 with ci2:
-    d2_in = st.date_input("Fine Periodo:", date(2026, 12, 31), on_change=reset_res)
+    # BLOCCO DATE 2024-2026 REINSERITO
+    d2_in = st.date_input("Data Fine:", 
+                         value=date(2026, 12, 31), 
+                         min_value=date(2024, 1, 1), 
+                         max_value=date(2026, 12, 31), 
+                         on_change=reset_res)
     l2 = st.number_input("Lettura Finale:", value=800.0, on_change=reset_res)
 
 if st.button("ESEGUI ELABORAZIONE AUDIT", type="primary", use_container_width=True):
@@ -120,7 +129,6 @@ if st.session_state.res:
         "ATO5 (€)": [res['r_a']['af']+res['r_a']['av'], res['r_a']['ff']+res['r_a']['fv'], res['r_a']['df']+res['r_a']['dv'], res['up'], res['t_ato']],
         "Sociale (€)": [res['r_ts']['af']+res['r_ts']['av'], res['r_ts']['ff']+res['r_ts']['fv'], res['r_ts']['df']+res['r_ts']['dv'], res['up'], res['t_ts']]
     }, index=["Acquedotto", "Fognatura", "Depurazione", "Perequazione (UI)", "TOTALE LORDO"])
-    # Formattazione pulita: niente separatore migliaia, punto per decimali
     st.table(df_comp.style.format(precision=2, thousands="", decimal="."))
     
     st.markdown("---")
@@ -133,12 +141,8 @@ if st.session_state.res:
     
     st.markdown("---")
     st.subheader("📅 Ripartizione Pro-Rata")
-    # Formattazione Pro-Rata: MC 1 decimale, Importo 2 decimali, niente migliaia
     df_det = pd.DataFrame(res["det"])
-    st.table(df_det.style.format({
-        "MC": "{:.1f}",
-        "Importo t. €": "{:.2f}"
-    }, thousands="", decimal="."))
+    st.table(df_det.style.format({"MC": "{:.1f}", "Importo t. €": "{:.2f}"}, thousands="", decimal="."))
 
 
 
