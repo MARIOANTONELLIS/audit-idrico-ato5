@@ -7,14 +7,19 @@ import os
 # --- 1. CONFIGURAZIONE ---
 st.set_page_config(page_title="Audit Idrico ATO5", page_icon="icon.png", layout="wide")
 
-# --- 2. CSS PER PULIZIA INTERFACCIA ---
+# --- 2. CSS AGGIORNATO (Senza nascondere l'Header) ---
 st.markdown("""
     <style>
+    /* Nasconde solo il menu 'tre puntini' e il tasto Deploy, ma lascia l'header per la sidebar */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
     .stDeployButton {display:none;}
     .stTable {margin-left: auto; margin-right: auto;}
+    
+    /* Forza la visualizzazione del tasto sidebar su mobile */
+    button[kind="header"] {
+        visibility: visible !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -91,6 +96,7 @@ if st.button("ESEGUI ELABORAZIONE AUDIT", type="primary", use_container_width=Tr
             c_ff, c_fv = db["f_fog"]*(gg/365)*mf, mc_y*db["v_fog"]*mf
             c_df, c_dv = db["f_dep"]*(gg/365)*md, mc_y*db["v_dep"]*md
             c_up = mc_y * UI_TOT
+            # Calcolo totale lordo di periodo per la tabella pro-rata
             tot_y = (c_af + c_av + c_ff + c_fv + c_df + c_dv + c_up) * iva
             r_a["af"]+=c_af; r_a["av"]+=c_av; r_a["ff"]+=c_ff; r_a["fv"]+=c_fv; r_a["df"]+=c_df; r_a["dv"]+=c_dv
             det.append({"Anno": y, "Giorni": gg, "MC": round(mc_y, 1), "Importo t. €": round(tot_y, 2)})
@@ -106,7 +112,7 @@ if st.session_state.res:
     # 1. KPI
     k1, k2, k3 = st.columns(3)
     k1.metric("Volume Totale", f"{res['mc']:.1f} mc")
-    k2.metric("Giorni Totali", f"{res['gg']} gg")
+    k2.metric("Arco Temporale", f"{res['gg']} gg")
     k3.metric("Totale ATO5", f"€ {res['t_ato']:.2f}")
 
     # 2. TABELLA CONFRONTO
@@ -118,7 +124,7 @@ if st.session_state.res:
     st.table(df_comp.style.format("{:.2f}"))
     st.success(f"RISPARMIO POTENZIALE: € {res['t_ato']-res['t_ts']:.2f}")
 
-    # 3. GRAFICO RAFFRONTO (Barre)
+    # 3. GRAFICO RAFFRONTO
     st.markdown("---")
     st.subheader("📊 Grafico di Raffronto Totali")
     df_bar = pd.DataFrame({"Tariffa": ["ATO5", "Sociale"], "Totale €": [res['t_ato'], res['t_ts']]})
@@ -136,5 +142,6 @@ if st.session_state.res:
     st.markdown("---")
     st.subheader("📅 Ripartizione Analitica Pro-Rata")
     st.table(pd.DataFrame(res["det"]))
+
 
 
